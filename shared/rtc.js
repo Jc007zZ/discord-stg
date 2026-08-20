@@ -60,8 +60,67 @@ export const MORTO = new Set(['failed', 'closed', 'disconnected']);
  * reporta e o `try` de quem construiu, com a mensagem de erro de verdade em
  * vez de um diagnostico chutado por esta funcao.
  */
+// O iframe de socorro, quando preciso. Fica vivo pelo resto da sessao de
+// proposito: objeto vindo de um quadro removido para de funcionar no Chromium,
+// e o peer nasceria morto alguns segundos depois de criado.
+let quadroDeSocorro = null;
+
+function doQuadro() {
+  if (typeof document === 'undefined') return null;
+  try {
+    if (!quadroDeSocorro?.isConnected) {
+      quadroDeSocorro = document.createElement('iframe');
+      quadroDeSocorro.setAttribute('aria-hidden', 'true');
+      Object.assign(quadroDeSocorro.style, {
+        position: 'fixed',
+        width: '0',
+        height: '0',
+        border: '0',
+        opacity: '0',
+        pointerEvents: 'none',
+      });
+      document.body.append(quadroDeSocorro);
+    }
+    const Classe = quadroDeSocorro.contentWindow?.RTCPeerConnection;
+    return typeof Classe === 'function' ? Classe : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * O RTCPeerConnection utilizavel deste ambiente, custe o que custar.
+ *
+ * Dentro da atividade do Discord o `RTCPeerConnection` do window vale `null` —
+ * anulado de proposito. Mas anular uma propriedade nao remove a capacidade do
+ * processo, e sobraram tres portas abertas, medidas no ambiente real:
+ *
+ *   1. `webkitRTCPeerConnection`, o alias antigo, continua sendo function
+ *   2. a propriedade e configuravel e gravavel
+ *   3. um iframe filho, de mesma origem, nasce com a API intacta
+ *
+ * A ordem aqui e por custo. O alias nao cria nada e nao tem ciclo de vida; o
+ * iframe e a ultima parada, porque precisa ficar vivo enquanto durar a sessao.
+ *
+ * Fora da atividade a primeira linha resolve e nada disto acontece.
+ */
+export function construtorPeer() {
+  if (typeof RTCPeerConnection === 'function') return RTCPeerConnection;
+  if (typeof globalThis.webkitRTCPeerConnection === 'function') {
+    return globalThis.webkitRTCPeerConnection;
+  }
+  return doQuadro();
+}
+
+/** Onde este ambiente achou a API, para o diagnostico saber dizer. */
+export function origemDoPeer() {
+  if (typeof RTCPeerConnection === 'function') return 'window';
+  if (typeof globalThis.webkitRTCPeerConnection === 'function') return 'webkit';
+  return doQuadro() ? 'iframe' : 'nenhuma';
+}
+
 export function suportaWebRTC() {
-  return typeof RTCPeerConnection !== 'undefined' && RTCPeerConnection !== null;
+  return construtorPeer() !== null;
 }
 
 /**
@@ -129,11 +188,12 @@ export function diagnosticoWebRTC() {
  * Devolve 'ok' ou a mensagem do erro, para o log contar o motivo exato.
  */
 export function testarPeer() {
-  if (!suportaWebRTC()) return `ausente (typeof ${typeof RTCPeerConnection})`;
+  const Classe = construtorPeer();
+  if (!Classe) return `ausente (typeof ${typeof RTCPeerConnection})`;
   try {
-    const pc = new RTCPeerConnection({ iceServers: [] });
+    const pc = new Classe({ iceServers: [] });
     pc.close();
-    return 'ok';
+    return `ok via ${origemDoPeer()}`;
   } catch (err) {
     return `nao constroi: ${err.message}`;
   }
@@ -144,7 +204,10 @@ export function testarPeer() {
  * este módulo não conhece nem sala, nem slot, nem sinalização.
  */
 export function criarPeer({ ice, onIce, onEstado, onTrack }) {
-  const pc = new RTCPeerConnection({
+  const Classe = construtorPeer();
+  if (!Classe) throw new Error('Este navegador nao tem RTCPeerConnection utilizavel.');
+
+  const pc = new Classe({
     iceServers: ice ?? ICE_PADRAO,
     // Junta áudio e vídeo num transporte só. Sem isso são duas negociações de
     // ICE para a mesma conexão, e o dobro de tempo até o primeiro quadro.

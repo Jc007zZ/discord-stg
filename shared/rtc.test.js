@@ -15,15 +15,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  ajustarEnvio,
-  criarPeer,
-  MORTO,
-  PRAZO_CONEXAO_MS,
-  resumoPeer,
-  suportaWebRTC,
-  testarPeer,
-} from './rtc.js';
+import { ajustarEnvio, criarPeer, MORTO, PRAZO_CONEXAO_MS, resumoPeer } from './rtc.js';
 
 const STUN = 'stun:stun.l.google.com:19302';
 
@@ -148,45 +140,112 @@ describe('iceServers', () => {
   });
 });
 
-describe('suportaWebRTC e testarPeer', () => {
-  it('aceita RTCPeerConnection que o typeof reporta como objeto', () => {
-    // O caso real que custou horas: dentro da atividade do Discord o typeof
-    // responde 'object', e exigir 'function' rejeitava um ambiente que
-    // funcionava — com a mensagem "sem WebRTC neste navegador", que era falsa.
-    vi.stubGlobal('RTCPeerConnection', Object.assign(Object.create(null), { nao: 'e function' }));
+describe('achar um RTCPeerConnection utilizavel', () => {
+  /**
+   * Um `document` de mentira com um iframe que devolve a classe pedida.
+   *
+   * O caminho do iframe nao da para testar em Node de outro jeito, e ele e
+   * justamente a ultima linha de defesa: se o Discord fechar o alias antigo
+   * um dia, e ele que segura o P2P dentro da atividade.
+   */
+  function documentoComQuadro(Classe) {
+    const quadro = {
+      style: {},
+      isConnected: false,
+      setAttribute() {},
+      contentWindow: { RTCPeerConnection: Classe },
+      remove() {
+        this.isConnected = false;
+      },
+    };
+    return {
+      quadro,
+      doc: {
+        createElement: () => quadro,
+        body: {
+          append() {
+            quadro.isConnected = true;
+          },
+        },
+      },
+    };
+  }
 
-    expect(suportaWebRTC()).toBe(true);
+  /** Reimporta o modulo: o iframe de socorro fica guardado entre chamadas. */
+  async function comAmbiente({ janela, webkit, doc }) {
+    vi.resetModules();
+    vi.stubGlobal('RTCPeerConnection', janela);
+    vi.stubGlobal('webkitRTCPeerConnection', webkit);
+    if (doc) vi.stubGlobal('document', doc);
+    return import('./rtc.js');
+  }
+
+  it('usa o do window quando ele esta la', async () => {
+    const rtc = await comAmbiente({ janela: PeerFalso });
+
+    expect(rtc.suportaWebRTC()).toBe(true);
+    expect(rtc.origemDoPeer()).toBe('window');
+    expect(rtc.construtorPeer()).toBe(PeerFalso);
   });
 
-  it('recusa quando nao existe', () => {
-    vi.stubGlobal('RTCPeerConnection', undefined);
-    expect(suportaWebRTC()).toBe(false);
-    expect(testarPeer()).toMatch(/ausente/);
+  it('cai no alias antigo quando o window foi anulado', async () => {
+    // O caso da atividade do Discord: `RTCPeerConnection` vale null — e
+    // `typeof null` e 'object', o que ja custou horas de diagnostico errado —
+    // mas anularam um e esqueceram `webkitRTCPeerConnection`.
+    const rtc = await comAmbiente({ janela: null, webkit: PeerFalso });
+
+    expect(rtc.suportaWebRTC()).toBe(true);
+    expect(rtc.origemDoPeer()).toBe('webkit');
+    expect(rtc.construtorPeer()).toBe(PeerFalso);
   });
 
-  it('recusa o nulo, que o typeof tambem chama de objeto', () => {
-    vi.stubGlobal('RTCPeerConnection', null);
-    expect(suportaWebRTC()).toBe(false);
+  it('cai no iframe quando nem o alias sobrou', async () => {
+    const { doc } = documentoComQuadro(PeerFalso);
+    const rtc = await comAmbiente({ janela: null, webkit: undefined, doc });
+
+    expect(rtc.origemDoPeer()).toBe('iframe');
+    expect(rtc.construtorPeer()).toBe(PeerFalso);
   });
 
-  it('constroi um peer descartavel e o fecha', () => {
-    expect(testarPeer()).toBe('ok');
-    expect(PeerFalso.criados.at(-1).fechado).toBe(true);
+  it('reaproveita o mesmo iframe, em vez de criar um por peer', async () => {
+    // Objeto vindo de quadro removido para de funcionar no Chromium, e criar
+    // um por conexao encheria o DOM de quadros vivos.
+    const { doc, quadro } = documentoComQuadro(PeerFalso);
+    const rtc = await comAmbiente({ janela: null, webkit: undefined, doc });
+    rtc.construtorPeer(); // a primeira vez cria mesmo
+    const criar = vi.spyOn(doc, 'createElement');
+
+    rtc.construtorPeer();
+    rtc.construtorPeer();
+
+    expect(criar).not.toHaveBeenCalled();
+    expect(quadro.isConnected).toBe(true);
   });
 
-  it('devolve o erro de verdade quando o sandbox nao deixa construir', () => {
-    // Existir e poder construir sao coisas diferentes, e so a segunda importa.
-    // O motivo exato vale mais que um "nao suportado" chutado por nos.
-    vi.stubGlobal(
-      'RTCPeerConnection',
-      class {
+  it('desiste quando nao ha nenhuma das tres portas', async () => {
+    const rtc = await comAmbiente({ janela: null, webkit: undefined, doc: undefined });
+
+    expect(rtc.suportaWebRTC()).toBe(false);
+    expect(rtc.origemDoPeer()).toBe('nenhuma');
+    expect(rtc.testarPeer()).toMatch(/ausente/);
+  });
+
+  it('diz por qual porta entrou quando o teste passa', async () => {
+    const rtc = await comAmbiente({ janela: null, webkit: PeerFalso });
+
+    expect(rtc.testarPeer()).toBe('ok via webkit');
+  });
+
+  it('devolve o erro de verdade quando existe mas nao constroi', async () => {
+    const rtc = await comAmbiente({
+      janela: class {
         constructor() {
           throw new TypeError('Illegal constructor');
         }
       },
-    );
+    });
 
-    expect(testarPeer()).toBe('nao constroi: Illegal constructor');
+    expect(rtc.testarPeer()).toBe('nao constroi: Illegal constructor');
   });
 });
 
