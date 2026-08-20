@@ -15,7 +15,15 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ajustarEnvio, criarPeer, MORTO, PRAZO_CONEXAO_MS, resumoPeer } from './rtc.js';
+import {
+  ajustarEnvio,
+  criarPeer,
+  MORTO,
+  PRAZO_CONEXAO_MS,
+  resumoPeer,
+  suportaWebRTC,
+  testarPeer,
+} from './rtc.js';
 
 const STUN = 'stun:stun.l.google.com:19302';
 
@@ -26,6 +34,7 @@ class PeerFalso {
     this.ouvintes = new Map();
     this.senders = [];
     this.estatisticas = new Map();
+    this.fechado = false;
     PeerFalso.criados.push(this);
   }
   addEventListener(nome, fn) {
@@ -39,6 +48,9 @@ class PeerFalso {
   }
   async getStats() {
     return this.estatisticas;
+  }
+  close() {
+    this.fechado = true;
   }
 }
 PeerFalso.criados = [];
@@ -133,6 +145,48 @@ describe('iceServers', () => {
     }));
 
     expect(await iceServers()).toEqual([{ urls: STUN }]);
+  });
+});
+
+describe('suportaWebRTC e testarPeer', () => {
+  it('aceita RTCPeerConnection que o typeof reporta como objeto', () => {
+    // O caso real que custou horas: dentro da atividade do Discord o typeof
+    // responde 'object', e exigir 'function' rejeitava um ambiente que
+    // funcionava — com a mensagem "sem WebRTC neste navegador", que era falsa.
+    vi.stubGlobal('RTCPeerConnection', Object.assign(Object.create(null), { nao: 'e function' }));
+
+    expect(suportaWebRTC()).toBe(true);
+  });
+
+  it('recusa quando nao existe', () => {
+    vi.stubGlobal('RTCPeerConnection', undefined);
+    expect(suportaWebRTC()).toBe(false);
+    expect(testarPeer()).toMatch(/ausente/);
+  });
+
+  it('recusa o nulo, que o typeof tambem chama de objeto', () => {
+    vi.stubGlobal('RTCPeerConnection', null);
+    expect(suportaWebRTC()).toBe(false);
+  });
+
+  it('constroi um peer descartavel e o fecha', () => {
+    expect(testarPeer()).toBe('ok');
+    expect(PeerFalso.criados.at(-1).fechado).toBe(true);
+  });
+
+  it('devolve o erro de verdade quando o sandbox nao deixa construir', () => {
+    // Existir e poder construir sao coisas diferentes, e so a segunda importa.
+    // O motivo exato vale mais que um "nao suportado" chutado por nos.
+    vi.stubGlobal(
+      'RTCPeerConnection',
+      class {
+        constructor() {
+          throw new TypeError('Illegal constructor');
+        }
+      },
+    );
+
+    expect(testarPeer()).toBe('nao constroi: Illegal constructor');
   });
 });
 

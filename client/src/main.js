@@ -6,6 +6,7 @@ import {
   iceServers,
   criarPeer,
   suportaWebRTC,
+  testarPeer,
   resumoPeer,
   MORTO,
   PRAZO_CONEXAO_MS,
@@ -1901,6 +1902,8 @@ function connect() {
       JSON.stringify({
         type: 'ambiente',
         rtc: typeof RTCPeerConnection,
+        // Nao basta existir: o que decide e conseguir construir.
+        peer: testarPeer(),
         discord: inDiscord,
         origem: location.origin,
       }),

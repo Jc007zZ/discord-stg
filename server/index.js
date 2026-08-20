@@ -1087,9 +1087,10 @@ function handleViewer(ws, room, auth, soDireto = false) {
     // em vez de deduzir do console ou da conta de banda.
     if (msg.type === 'ambiente') {
       const rtc = String(msg.rtc).slice(0, 12);
+      const peer = String(msg.peer ?? '?').slice(0, 80);
       const origem = String(msg.origem ?? '').slice(0, 60);
       console.log(
-        `[room ${room.id}] [ambiente] ${auth.name} — RTCPeerConnection: ${rtc} · Discord: ${msg.discord ? 'sim' : 'nao'} · ${origem}`,
+        `[room ${room.id}] [ambiente] ${auth.name} — RTCPeerConnection: ${rtc} · peer: ${peer} · Discord: ${msg.discord ? 'sim' : 'nao'} · ${origem}`,
       );
       return;
     }

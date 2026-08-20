@@ -48,8 +48,38 @@ export const PRAZO_CONEXAO_MS = 8000;
 /** Estados dos quais não se volta: aqui a tentativa acabou. */
 export const MORTO = new Set(['failed', 'closed', 'disconnected']);
 
+/**
+ * Existe RTCPeerConnection aqui?
+ *
+ * Exigir `typeof === 'function'` custou caro: dentro da atividade do Discord o
+ * `typeof` responde `'object'`, e a checagem rejeitava um ambiente que talvez
+ * suportasse tudo. Pior, a rejeicao virava a mensagem "sem WebRTC neste
+ * navegador" — que dizia uma coisa e escondia outra.
+ *
+ * Agora a pergunta e so "esta ai". Se estiver e nao der para construir, quem
+ * reporta e o `try` de quem construiu, com a mensagem de erro de verdade em
+ * vez de um diagnostico chutado por esta funcao.
+ */
 export function suportaWebRTC() {
-  return typeof RTCPeerConnection === 'function';
+  return typeof RTCPeerConnection !== 'undefined' && RTCPeerConnection !== null;
+}
+
+/**
+ * Constroi um peer descartavel so para ver o que acontece.
+ *
+ * E o unico jeito honesto de responder "da para usar WebRTC aqui": nem o
+ * `typeof` nem a presenca do simbolo dizem se o sandbox deixa construir.
+ * Devolve 'ok' ou a mensagem do erro, para o log contar o motivo exato.
+ */
+export function testarPeer() {
+  if (!suportaWebRTC()) return `ausente (typeof ${typeof RTCPeerConnection})`;
+  try {
+    const pc = new RTCPeerConnection({ iceServers: [] });
+    pc.close();
+    return 'ok';
+  } catch (err) {
+    return `nao constroi: ${err.message}`;
+  }
 }
 
 /**
