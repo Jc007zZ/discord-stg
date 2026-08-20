@@ -950,13 +950,17 @@ server.on('upgrade', (req, socket, head) => {
   const fonte = R.FONTES.has(pedida) ? pedida : 'tela';
   // A aba de captura abre esta conexão ao carregar, antes de qualquer captura.
   const controle = url.searchParams.get('modo') === 'controle';
+  // Diagnóstico: este espectador não quer o relay como rede de segurança. Ver
+  // a nota em rooms.js/pushChunk. Vale só para esta conexão, e é o que permite
+  // testar a conexão direta sem tirar a rede de segurança de mais ninguém.
+  const soDireto = url.searchParams.get('p2p') === 'only';
 
   wss.handleUpgrade(req, socket, head, (ws) => {
-    wss.emit('connection', ws, req, payload, fonte, controle);
+    wss.emit('connection', ws, req, payload, fonte, controle, soDireto);
   });
 });
 
-wss.on('connection', (ws, _req, auth, fonte, controle) => {
+wss.on('connection', (ws, _req, auth, fonte, controle, soDireto) => {
   ws.__connectedAt = Date.now();
   ws.__rttMs = null;
   ws.__pingSentAt = null;
@@ -974,7 +978,7 @@ wss.on('connection', (ws, _req, auth, fonte, controle) => {
   } else if (auth.role === 'broadcaster') {
     handleBroadcaster(ws, room, { id: auth.uid, name: auth.name, avatar: auth.av ?? null }, fonte);
   } else {
-    handleViewer(ws, room, auth);
+    handleViewer(ws, room, auth, soDireto);
   }
 });
 
@@ -1049,8 +1053,17 @@ function handleBroadcaster(ws, room, info, fonte) {
   });
 }
 
-function handleViewer(ws, room, auth) {
-  R.attachViewer(room, ws, { id: auth.uid, name: auth.name, avatar: auth.av ?? null });
+function handleViewer(ws, room, auth, soDireto = false) {
+  R.attachViewer(
+    room,
+    ws,
+    { id: auth.uid, name: auth.name, avatar: auth.av ?? null },
+    { soDireto },
+  );
+
+  if (soDireto) {
+    console.log(`[room ${room.id}] ${auth.name} entrou SEM relay (p2p=only)`);
+  }
 
   ws.on('message', (data, isBinary) => {
     if (isBinary) return;
@@ -1088,8 +1101,22 @@ function handleViewer(ws, room, auth) {
 
     // A conexão direta assumiu (ou caiu). Só quem assiste sabe dizer, porque só
     // ele vê quadro chegando — e é isso que liga e desliga o relay para ele.
+    //
+    // O log aqui é o que responde "o P2P está funcionando?". A queda para o
+    // relay é desenhada para ser invisível — e por isso mesmo, sem contá-la,
+    // uma malha que nunca fecha se parece exatamente com uma que fecha sempre.
+    // O motivo importa mais que a contagem: prazo estourado é ICE que não
+    // fechou, falha imediata é NAT dos dois lados, queda depois de conectar é
+    // rede instável, e "sem webrtc" é sandbox bloqueando. Cada um aponta para
+    // uma solução diferente.
     if (msg.type === 'rtc-ativo' && Number.isInteger(msg.slot)) {
       R.rtcAtivo(room, ws, msg.slot, Boolean(msg.on));
+      const motivo = typeof msg.motivo === 'string' ? msg.motivo.slice(0, 40) : 'sem motivo';
+      console.log(
+        msg.on
+          ? `[room ${room.id}] [p2p] ${auth.name} assumiu a conexao direta (slot ${msg.slot})`
+          : `[room ${room.id}] [p2p] ${auth.name} voltou ao relay (slot ${msg.slot}) — ${motivo}`,
+      );
       return;
     }
 

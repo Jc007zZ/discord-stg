@@ -712,6 +712,12 @@ export function pushChunk(room, entry, chunk) {
     // conjunto e os bytes voltam a fluir no mesmo instante.
     if (v.__rtc?.has(entry.slot)) continue;
 
+    // Pediu para não ter rede de segurança. É o modo que transforma a falha
+    // silenciosa do WebRTC em tela preta — a única forma de descobrir se a
+    // conexão direta fecha de verdade, já que quando ela não fecha o relay
+    // cobre o buraco tão bem que ninguém percebe. Nunca é o padrão.
+    if (v.__soDireto) continue;
+
     // Áudio não depende de keyframe — cada pacote Opus se decodifica sozinho —,
     // então não passa pelo controle de "já recebeu ponto de partida".
     if (isAudio) {
@@ -908,6 +914,7 @@ function encerrarPeer(room, ws, slot) {
 function atualizarChunks(room, entry) {
   let precisa = 0;
   for (const v of room.viewers) {
+    if (v.__soDireto) continue;
     if (v.__watching?.has(entry.slot) && !v.__rtc?.has(entry.slot)) precisa++;
   }
 
@@ -919,13 +926,19 @@ function atualizarChunks(room, entry) {
   if (ligado) requestKeyframe(entry, { urgente: true });
 }
 
-export function attachViewer(room, ws, info) {
+/**
+ * @param {object} opcoes
+ * @param {boolean} [opcoes.soDireto]  não receber nada pelo relay — ver a nota
+ *   em pushChunk. Modo de diagnóstico, ligado por `?p2p=only` na URL.
+ */
+export function attachViewer(room, ws, info, { soDireto = false } = {}) {
   ws.__primed = new Set();
   ws.__watching = new Set();
   // Slots que já chegam por WebRTC. Enquanto o slot está aqui, o relay não
   // manda os bytes dele para este espectador — seria o mesmo vídeo duas vezes.
   ws.__rtc = new Set();
   ws.__peerId ??= `p${proximoPeerId++}`;
+  ws.__soDireto = soDireto;
   ws.__info = info;
   ws.__connectedAt = ws.__connectedAt ?? Date.now();
   ws.__mediaBytesOut = ws.__mediaBytesOut ?? 0;

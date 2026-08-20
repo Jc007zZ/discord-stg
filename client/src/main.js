@@ -21,6 +21,19 @@ const inDiscord = params.has('frame_id');
 // Dentro da Activity todo tráfego precisa passar pelo proxy do Discord.
 const P = inDiscord ? '/.proxy' : '';
 
+/**
+ * `?p2p=only` desliga o relay para esta aba, e só para ela.
+ *
+ * A queda da conexão direta para o relay foi desenhada para ser invisível — e
+ * é justamente por isso que uma malha que nunca fecha se parece com uma que
+ * fecha sempre. Aqui a rede de segurança sai: ou o WebRTC entrega, ou a tela
+ * fica preta. É a diferença entre supor e ver.
+ *
+ * Vale por conexão, nunca por padrão: quem não passa a chave continua com o
+ * relay entregando desde o primeiro segundo.
+ */
+const SO_DIRETO = params.get('p2p') === 'only';
+
 // Um decoder e um canvas por transmissor, indexados pelo slot que o servidor
 // atribuiu. Os canvas vivem fora do DOM entre renderizações e são movidos para
 // dentro do tile de cada pessoa — detachar não apaga o conteúdo nem invalida o
@@ -1023,7 +1036,16 @@ function closeAllStreams() {
  */
 async function receberOferta(slot, sdp) {
   const s = streams.get(slot);
-  if (!s || !suportaWebRTC()) return;
+  if (!s) return;
+
+  // Sem RTCPeerConnection não há o que tentar — e este é o caso que mais
+  // importa distinguir dos outros: dentro da Activity o tráfego todo passa
+  // pelo proxy do Discord, e se ele bloquear o WebRTC nenhum TURN do mundo
+  // resolve. Calado, isso se parece com uma negociação que só demorou.
+  if (!suportaWebRTC()) {
+    desistirDoRtc(slot, 'sem WebRTC neste navegador');
+    return;
+  }
 
   // Oferta nova para um slot que já tinha conexão significa que o outro lado
   // recomeçou; a antiga não vai voltar a entregar nada.
@@ -1038,7 +1060,7 @@ async function receberOferta(slot, sdp) {
       ice,
       onIce: (candidate) => enviarRtc(slot, { kind: 'ice', candidate }),
       onEstado: (estado) => {
-        if (MORTO.has(estado)) desistirDoRtc(slot);
+        if (MORTO.has(estado)) desistirDoRtc(slot, `conexao ${estado}`);
       },
       onTrack: (e) => {
         const [remoto] = e.streams;
@@ -1061,11 +1083,11 @@ async function receberOferta(slot, sdp) {
 
     clearTimeout(s.prazoRtc);
     s.prazoRtc = setTimeout(() => {
-      if (!s.viaRtc) desistirDoRtc(slot);
+      if (!s.viaRtc) desistirDoRtc(slot, `prazo de ${PRAZO_CONEXAO_MS / 1000}s sem quadro`);
     }, PRAZO_CONEXAO_MS);
   } catch (err) {
     console.warn('[rtc] resposta falhou:', err.message);
-    desistirDoRtc(slot);
+    desistirDoRtc(slot, `erro: ${err.message}`);
   }
 }
 
@@ -1112,7 +1134,7 @@ function assumirRtc(slot) {
  * casos o relay é o destino, e ele nunca precisou ser religado do lado de cá:
  * basta o servidor voltar a mandar os bytes, e é isso que o aviso faz.
  */
-function desistirDoRtc(slot) {
+function desistirDoRtc(slot, motivo = 'sem motivo') {
   const s = streams.get(slot);
   if (!s) return;
 
@@ -1129,7 +1151,13 @@ function desistirDoRtc(slot) {
     renderBar();
   }
 
-  if (watching.has(slot)) ws?.send(JSON.stringify({ type: 'rtc-ativo', slot, on: false }));
+  // O motivo vai junto porque é ele que separa os caminhos possíveis: prazo
+  // estourado é ICE que não fechou, falha imediata é NAT simétrico dos dois
+  // lados, queda depois de conectar é rede instável. Sem ele o servidor só
+  // sabe que não deu certo, que é a metade inútil da informação.
+  if (watching.has(slot)) {
+    ws?.send(JSON.stringify({ type: 'rtc-ativo', slot, on: false, motivo }));
+  }
 }
 
 function fecharPeer(s) {
@@ -1191,7 +1219,11 @@ function ensureStatsTimer() {
         $('pLag').textContent = rtt === null ? '—' : `${rtt} ms${relay ? ' · TURN' : ''}`;
       });
     } else {
-      $('pVia').textContent = s.pc ? 'relay (negociando direto…)' : 'relay (WebSocket)';
+      $('pVia').textContent = SO_DIRETO
+        ? 'p2p=only — sem relay, aguardando direto'
+        : s.pc
+          ? 'relay (negociando direto…)'
+          : 'relay (WebSocket)';
       $('pLag').textContent = `${Math.max(0, s.player.getLag())} ms`;
       $('pFps').textContent = `${s.player.takeFrameCount()} fps`;
       $('pRes').textContent = s.player.getSizes().video;
@@ -1847,7 +1879,8 @@ function connect() {
   if (!roomTokens) return;
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(
-    `${proto}://${location.host}${P}/ws?t=${encodeURIComponent(roomTokens.viewerToken)}`,
+    `${proto}://${location.host}${P}/ws?t=${encodeURIComponent(roomTokens.viewerToken)}` +
+      (SO_DIRETO ? '&p2p=only' : ''),
   );
   ws.binaryType = 'arraybuffer';
 

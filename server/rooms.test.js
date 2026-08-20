@@ -976,6 +976,48 @@ describe('WebRTC', () => {
     expect(ws.mensagens().some((m) => m.type === 'chunks' && m.on)).toBe(false);
   });
 
+  it('nunca manda quadro a quem entrou sem rede de segurança', () => {
+    // p2p=only: o relay sai do caminho desde o primeiro quadro, e nao depois
+    // que a conexao direta assume. E o que torna a falha do WebRTC visivel.
+    const { room, entry } = comTransmissao();
+    const so = socket();
+    R.attachViewer(room, so, pessoa('so-direto'), { soDireto: true });
+    R.watch(room, so, entry.slot);
+    so.limpar();
+
+    R.pushChunk(room, entry, quadro(entry.slot, KEYFRAME));
+    R.pushChunk(room, entry, quadro(entry.slot, DELTA));
+    R.pushChunk(room, entry, quadro(entry.slot, AUDIO));
+
+    expect(so.binarios()).toHaveLength(0);
+  });
+
+  it('quem entrou sem rede de segurança não segura o relay ligado', () => {
+    // Senao um unico testador em p2p=only faria o transmissor continuar
+    // subindo para um relay que nao entrega a ninguem.
+    const { room, viewer, ws, entry } = comTransmissao();
+    R.rtcAtivo(room, viewer, entry.slot, true);
+    ws.limpar();
+
+    const so = socket();
+    R.attachViewer(room, so, pessoa('so-direto'), { soDireto: true });
+    R.watch(room, so, entry.slot);
+
+    expect(ws.mensagens().some((m) => m.type === 'chunks' && m.on)).toBe(false);
+  });
+
+  it('sem a chave, o espectador continua com a rede de segurança', () => {
+    const { room, entry } = comTransmissao();
+    const normal = socket();
+    R.attachViewer(room, normal, pessoa('normal'));
+    R.watch(room, normal, entry.slot);
+    normal.limpar();
+
+    R.pushChunk(room, entry, quadro(entry.slot, KEYFRAME));
+
+    expect(normal.binarios()).toHaveLength(1);
+  });
+
   it('esquece a conexão direta quando a transmissão termina', () => {
     const { room, viewer, entry } = comTransmissao();
     R.rtcAtivo(room, viewer, entry.slot, true);
