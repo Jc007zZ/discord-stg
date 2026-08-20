@@ -1082,6 +1082,18 @@ function handleViewer(ws, room, auth, soDireto = false) {
       return;
     }
 
+    // Quem assiste conta em que ambiente esta. E o unico jeito de saber se a
+    // atividade tem RTCPeerConnection: perguntar ao proprio codigo que a usa,
+    // em vez de deduzir do console ou da conta de banda.
+    if (msg.type === 'ambiente') {
+      const rtc = String(msg.rtc).slice(0, 12);
+      const origem = String(msg.origem ?? '').slice(0, 60);
+      console.log(
+        `[room ${room.id}] [ambiente] ${auth.name} — RTCPeerConnection: ${rtc} · Discord: ${msg.discord ? 'sim' : 'nao'} · ${origem}`,
+      );
+      return;
+    }
+
     if (msg.type === 'watch' && Number.isInteger(msg.slot)) {
       R.watch(room, ws, msg.slot);
       return;

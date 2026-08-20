@@ -1889,6 +1889,22 @@ function connect() {
   ws.addEventListener('open', () => {
     abriu = true;
     reconnectDelay = 1000;
+
+    // O ambiente visto por quem decide.
+    //
+    // Rodar `typeof RTCPeerConnection` no console nao responde a pergunta: o
+    // DevTools avalia no frame de cima por padrao, e a atividade vive num
+    // iframe de outra origem. Os dois contextos dao respostas diferentes, e a
+    // que importa e a deste codigo aqui — o mesmo que decide se tenta conexao
+    // direta ou nao. Uma linha no log vale mais que a discussao.
+    ws.send(
+      JSON.stringify({
+        type: 'ambiente',
+        rtc: typeof RTCPeerConnection,
+        discord: inDiscord,
+        origem: location.origin,
+      }),
+    );
     $('grid').hidden = false;
     setEmpty('Ninguém na sala', 'Aguardando participantes.');
 
