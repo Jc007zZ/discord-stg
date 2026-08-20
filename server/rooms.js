@@ -659,6 +659,18 @@ export function startStream(room, entry) {
     userId: entry.info.id,
     fonte: entry.fonte,
   });
+
+  // Ninguem assiste ainda — entao o transmissor nao tem por que subir nada.
+  //
+  // Sem esta linha o relay so era desligado quando alguem assistia e assumia a
+  // conexao direta. Uma transmissao sem espectador nenhum ficava mandando o
+  // fluxo inteiro para o servidor desde o primeiro segundo, e o servidor pagava
+  // a entrada para jogar tudo fora. Era banda gasta com plateia vazia.
+  //
+  // O transmissor ainda manda o config antes de silenciar: e ele que permite a
+  // quem chegar depois montar o decodificador, e o servidor o guarda.
+  atualizarChunks(room, entry);
+
   broadcastState(room);
 }
 

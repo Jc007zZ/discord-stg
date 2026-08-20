@@ -20,6 +20,12 @@ const {
   DISCORD_CLIENT_SECRET,
   DISCORD_BOT_TOKEN,
   DISCORD_ADMIN_ID = '',
+  // Ambiente inteiro sem relay. Existe para o staging: la o objetivo e que a
+  // falha do WebRTC apareca como tela preta, e nao seja escondida pelo relay.
+  // Em producao fica desligado — desligar a rede de seguranca de todo mundo
+  // seria descobrir se o P2P fecha quebrando a aplicacao para quem ele nao
+  // alcanca. Vazio, "0" e "false" contam como desligado.
+  P2P_ONLY = '',
   TURN_URL = '',
   TURN_USER = '',
   TURN_PASS = '',
@@ -32,6 +38,8 @@ const {
 // redirect do OAuth vira "//auth/callback", que não bate com o endereço
 // cadastrado no portal. O login falha sem explicar nada.
 const PUBLIC_ORIGIN = ORIGEM_CRUA.replace(/[/]+$/, '');
+
+const SO_P2P = !['', '0', 'false', 'no'].includes(String(P2P_ONLY).trim().toLowerCase());
 
 const isProd = NODE_ENV === 'production';
 // Mais de uma pessoa administra: separe os IDs por virgula. Um Set porque a
@@ -766,7 +774,7 @@ app.get('/auth/callback', async (req, res) => {
   }
 });
 
-app.get('/api/health', (_req, res) => res.json({ ok: true }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, soP2P: SO_P2P }));
 
 /**
  * Servidores ICE para a conexão direta entre quem transmite e quem assiste.
@@ -953,7 +961,7 @@ server.on('upgrade', (req, socket, head) => {
   // Diagnóstico: este espectador não quer o relay como rede de segurança. Ver
   // a nota em rooms.js/pushChunk. Vale só para esta conexão, e é o que permite
   // testar a conexão direta sem tirar a rede de segurança de mais ninguém.
-  const soDireto = url.searchParams.get('p2p') === 'only';
+  const soDireto = SO_P2P || url.searchParams.get('p2p') === 'only';
 
   wss.handleUpgrade(req, socket, head, (ws) => {
     wss.emit('connection', ws, req, payload, fonte, controle, soDireto);
@@ -1283,6 +1291,14 @@ server.listen(PORT, () => {
     if (PUBLIC_ORIGIN !== local) console.log(`  Painel publico: ${PUBLIC_ORIGIN}/admin`);
   } else {
     console.log('  Painel administrativo: desligado (defina DISCORD_ADMIN_ID no .env).');
+  }
+
+  // Alto e claro: ninguem deve descobrir que subiu isto em producao pela
+  // reclamacao de quem ficou com a tela preta.
+  if (SO_P2P) {
+    console.log('');
+    console.log('  ATENCAO: P2P_ONLY ligado — o relay esta desligado para TODOS.');
+    console.log('  Quem nao fechar conexao direta fica sem imagem. So para teste.');
   }
 
   // Erro fácil de cometer e difícil de diagnosticar: com PUBLIC_ORIGIN

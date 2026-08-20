@@ -926,6 +926,42 @@ describe('WebRTC', () => {
     expect(viewer.binarios()).toHaveLength(1);
   });
 
+  it('nasce desligado: transmissao sem plateia nao sobe nada', () => {
+    // O buraco que mais custou banda. O relay so era desligado quando alguem
+    // assistia e assumia a conexao direta — entao uma transmissao com zero
+    // espectadores mandava o fluxo inteiro para o servidor, o tempo todo, para
+    // ser descartado na chegada.
+    const { room } = salaComEspectador();
+    const ws = socket();
+    const entry = R.attachBroadcaster(room, ws, pessoa('transmissor'));
+    ws.limpar();
+
+    R.startStream(room, entry);
+
+    expect(ws.mensagens()).toContainEqual({ type: 'chunks', on: false });
+  });
+
+  it('liga assim que a primeira pessoa pede para assistir', () => {
+    const { room, viewer } = salaComEspectador();
+    const ws = socket();
+    const entry = R.attachBroadcaster(room, ws, pessoa('transmissor'));
+    R.startStream(room, entry);
+    ws.limpar();
+
+    R.watch(room, viewer, entry.slot);
+
+    expect(ws.mensagens()).toContainEqual({ type: 'chunks', on: true });
+  });
+
+  it('volta a desligar quando o ultimo espectador sai', () => {
+    const { room, viewer, ws, entry } = comTransmissao();
+    ws.limpar();
+
+    R.unwatch(room, viewer, entry.slot);
+
+    expect(ws.mensagens()).toContainEqual({ type: 'chunks', on: false });
+  });
+
   it('desliga o relay na origem quando ninguém mais depende dele', () => {
     const { room, viewer, ws, entry } = comTransmissao();
     ws.limpar();

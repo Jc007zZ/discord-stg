@@ -69,7 +69,10 @@ describe('/api/health', () => {
     const resposta = await get('/api/health');
 
     expect(resposta.status).toBe(200);
-    expect(await resposta.json()).toEqual({ ok: true });
+    // `soP2P` entra de proposito: e configuracao do proprio servidor, nao dado
+    // de sala, e e o unico jeito de confirmar de fora que um deploy pegou a
+    // variavel — sem isso a checagem seria abrir uma sala e olhar se travou.
+    expect(await resposta.json()).toEqual({ ok: true, soP2P: false });
   });
 });
 

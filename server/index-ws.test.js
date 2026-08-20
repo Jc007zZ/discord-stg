@@ -531,13 +531,30 @@ describe('sinalização WebRTC', () => {
 
   it('religa o relay, com keyframe, quando a conexão direta cai', async () => {
     const { transmissor, espectador, slot } = await noAr();
-    espectador.send(JSON.stringify({ type: 'rtc-ativo', slot, on: true }));
-    await ate(transmissor, (m) => m.type === 'chunks' && m.on === false, 'o desligamento');
-    transmissor.recebidas.length = 0;
 
+    /**
+     * Espera o histórico ter N avisos de `chunks` e devolve a sequência.
+     *
+     * `ate` não serve aqui: ele varre o histórico e devolve o primeiro que
+     * casa, então chamá-lo duas vezes com o mesmo predicado devolve a mesma
+     * mensagem. E o que se testa aqui é justamente a ordem — a transmissão já
+     * nasce desligada, sem plateia, e um predicado por valor pegaria esse
+     * desligamento em vez do que vem da conexão direta.
+     */
+    async function sequenciaDeChunks(n) {
+      for (let i = 0; i < 120; i++) {
+        const avisos = transmissor.recebidas.filter((m) => m.type === 'chunks');
+        if (avisos.length >= n) return avisos.map((m) => m.on);
+        await new Promise((pronto) => setTimeout(pronto, 25));
+      }
+      throw new Error(`tempo esgotado esperando ${n} avisos de chunks`);
+    }
+
+    espectador.send(JSON.stringify({ type: 'rtc-ativo', slot, on: true }));
     espectador.send(JSON.stringify({ type: 'rtc-ativo', slot, on: false }));
 
-    expect(await ate(transmissor, doTipo('chunks'), 'a religada')).toMatchObject({ on: true });
+    //          nasceu   assistiu   assumiu   caiu
+    expect(await sequenciaDeChunks(4)).toEqual([false, true, false, true]);
     await ate(transmissor, doTipo('need-keyframe'), 'o ponto de partida');
   });
 });
