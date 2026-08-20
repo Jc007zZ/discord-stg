@@ -65,6 +65,63 @@ export function suportaWebRTC() {
 }
 
 /**
+ * Procura uma saida quando o RTCPeerConnection do window foi anulado.
+ *
+ * Dentro da atividade do Discord ele vale `null` — e `typeof null` e 'object',
+ * o que ja custou horas de diagnostico errado aqui. Mas anular uma propriedade
+ * do window nao e o mesmo que remover a capacidade do processo: um iframe
+ * filho nasce com um window proprio, e se a anulacao foi feita so no objeto de
+ * cima, a API pode estar intacta la dentro.
+ *
+ * Quatro tentativas, da mais barata para a menos provavel. Nenhuma altera
+ * comportamento — isto so olha e conta o que viu.
+ */
+export function diagnosticoWebRTC() {
+  const fora = {};
+
+  fora.direto = typeof RTCPeerConnection;
+  fora.nulo = typeof RTCPeerConnection === 'object' && RTCPeerConnection === null;
+
+  // Alias antigo. Custa nada perguntar, e nem sempre quem remove um remove o outro.
+  fora.webkit = typeof globalThis.webkitRTCPeerConnection;
+
+  // Como a propriedade foi definida: se for gravavel ou configuravel, da para
+  // devolve-la a partir de outro lugar. Se for getter fixo, nao da.
+  try {
+    const d = Object.getOwnPropertyDescriptor(globalThis, 'RTCPeerConnection');
+    fora.propriedade = d
+      ? `${d.configurable ? 'config' : 'fixa'}/${d.writable ? 'gravavel' : 'somente-leitura'}${d.get ? '/getter' : ''}`
+      : 'sem descritor proprio';
+  } catch (err) {
+    fora.propriedade = `erro: ${err.message}`;
+  }
+
+  // A saida que interessa: um window filho, de mesma origem.
+  fora.iframe = (() => {
+    if (typeof document === 'undefined') return 'sem DOM';
+    let quadro = null;
+    try {
+      quadro = document.createElement('iframe');
+      quadro.style.display = 'none';
+      document.body.append(quadro);
+
+      const Classe = quadro.contentWindow?.RTCPeerConnection;
+      if (typeof Classe !== 'function') return `typeof ${typeof Classe}`;
+
+      const pc = new Classe({ iceServers: [] });
+      pc.close();
+      return 'function, e constroi';
+    } catch (err) {
+      return `erro: ${err.message}`;
+    } finally {
+      quadro?.remove();
+    }
+  })();
+
+  return fora;
+}
+
+/**
  * Constroi um peer descartavel so para ver o que acontece.
  *
  * E o unico jeito honesto de responder "da para usar WebRTC aqui": nem o

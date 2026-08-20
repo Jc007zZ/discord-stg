@@ -1100,6 +1100,12 @@ function handleViewer(ws, room, auth, soDireto = false) {
       console.log(
         `[room ${room.id}] [ambiente] ${auth.name} — RTCPeerConnection: ${rtc} · peer: ${peer} · Discord: ${msg.discord ? 'sim' : 'nao'} · ${origem}`,
       );
+      if (msg.saidas && typeof msg.saidas === 'object') {
+        const saidas = Object.entries(msg.saidas)
+          .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`)
+          .join(' · ');
+        console.log(`[room ${room.id}] [saidas] ${auth.name} — ${saidas.slice(0, 400)}`);
+      }
       return;
     }
 

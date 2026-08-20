@@ -7,6 +7,7 @@ import {
   criarPeer,
   suportaWebRTC,
   testarPeer,
+  diagnosticoWebRTC,
   resumoPeer,
   MORTO,
   PRAZO_CONEXAO_MS,
@@ -1904,6 +1905,8 @@ function connect() {
         rtc: typeof RTCPeerConnection,
         // Nao basta existir: o que decide e conseguir construir.
         peer: testarPeer(),
+        // As saidas possiveis quando o window teve a API anulada.
+        saidas: diagnosticoWebRTC(),
         discord: inDiscord,
         origem: location.origin,
       }),
