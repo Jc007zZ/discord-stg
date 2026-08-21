@@ -86,7 +86,7 @@ nem a subida de quem transmite — e sem que ninguém fique na tela preta.
 - **Troca de pai sem costura** — o usuário aceitou travadinha ou loading na troca; buscar transição invisível não vale o custo
 - **UI de "você está repassando"** — decidido invisível; acontece nos bastidores como em qualquer P2P
 - **Evitar o alerta de firewall do Windows** — pesquisado: não existe P2P real sem socket UDP, e toda alternativa devolve o custo para o servidor. O alerta é do `discord.exe`, reaparece a cada update do Discord por causa do caminho versionado, e quem bloquear cai no relay
-- **Promoção de produção (`origin`/`locutor`)** — o usuário decide quando promover; fora deste roadmap
+- **Promoção de produção (`origin`/`locutor`)** — o usuário decide quando promover; fora deste roadmap. **Mas registre-se o tamanho do que está parado:** produção (`92ba4f7`) já tem a correção de nível H.264 e já tem a estrela WebRTC — o que ela **não** tem é o `construtorPeer`. Sem ele, `window.RTCPeerConnection` é `null` dentro da Activity e **nenhum espectador que assiste pelo Discord fecha conexão direta**: todos caem no relay, pagando banda cheia. Também falta o corte de banda com zero espectadores. São 527 linhas já escritas e testadas nesta branch. Nenhuma fase deste roadmap entrega tanta economia de banda quanto promover isso
 - **Reescrever o `<video>` fora do DOM** — mapeado como risco BAIXO, funciona porque `srcObject` é setado antes do listener; vira nota de manutenção
 
 ## Context
