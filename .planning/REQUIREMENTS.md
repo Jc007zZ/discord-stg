@@ -125,25 +125,67 @@ Reconhecidos, adiados, fora deste roadmap.
 
 ## Traceability
 
-Preenchido durante a criação do roadmap.
+Cada requisito v1 mapeia para exatamente uma fase. Sem órfão, sem duplicata.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SPIKE-01 … SPIKE-06 | — | Pending |
-| UI-01 … UI-03 | — | Pending |
-| CTRL-01 … CTRL-03 | — | Pending |
-| TOPO-01 … TOPO-08 | — | Pending |
-| FWD-01 … FWD-04 | — | Pending |
-| SIG-01 … SIG-05 | — | Pending |
-| SURV-01 … SURV-05 | — | Pending |
-| MED-01 … MED-07 | — | Pending |
-| INST-01 … INST-05 | — | Pending |
-| TRANSP-01 | — | Pending |
+| SPIKE-01 | Phase 1 — Spike de repasse | Pending |
+| SPIKE-02 | Phase 1 — Spike de repasse | Pending |
+| SPIKE-03 | Phase 1 — Spike de repasse | Pending |
+| SPIKE-04 | Phase 1 — Spike de repasse | Pending |
+| SPIKE-05 | Phase 1 — Spike de repasse | Pending |
+| SPIKE-06 | Phase 1 — Spike de repasse | Pending |
+| UI-01 | Phase 2 — Consertos de interface | Pending |
+| UI-02 | Phase 2 — Consertos de interface | Pending |
+| UI-03 | Phase 2 — Consertos de interface | Pending |
+| CTRL-01 | Phase 3 — Higiene do plano de controle | Pending |
+| CTRL-02 | Phase 3 — Higiene do plano de controle | Pending |
+| CTRL-03 | Phase 3 — Higiene do plano de controle | Pending |
+| TOPO-01 | Phase 4 — Estado da árvore no servidor | Pending |
+| TOPO-02 | Phase 4 — Estado da árvore no servidor | Pending |
+| TOPO-03 | Phase 4 — Estado da árvore no servidor | Pending |
+| TOPO-04 | Phase 4 — Estado da árvore no servidor | Pending |
+| TOPO-05 | Phase 4 — Estado da árvore no servidor | Pending |
+| TOPO-06 | Phase 5 — Seleção de pai e teto de leque | Pending |
+| TOPO-07 | Phase 5 — Seleção de pai e teto de leque | Pending |
+| TOPO-08 | Phase 5 — Seleção de pai e teto de leque | Pending |
+| SIG-01 | Phase 6 — Protocolo de controle e roteamento por peerId | Pending |
+| SIG-02 | Phase 6 — Protocolo de controle e roteamento por peerId | Pending |
+| SIG-03 | Phase 6 — Protocolo de controle e roteamento por peerId | Pending |
+| SIG-04 | Phase 6 — Protocolo de controle e roteamento por peerId | Pending |
+| SIG-05 | Phase 6 — Protocolo de controle e roteamento por peerId | Pending |
+| FWD-01 | Phase 7 — Runtime do repassador | Pending |
+| FWD-02 | Phase 7 — Runtime do repassador | Pending |
+| FWD-03 | Phase 7 — Runtime do repassador | Pending |
+| FWD-04 | Phase 7 — Runtime do repassador | Pending |
+| SURV-01 | Phase 8 — Sobrevivência | Pending |
+| SURV-02 | Phase 8 — Sobrevivência | Pending |
+| SURV-03 | Phase 8 — Sobrevivência | Pending |
+| SURV-04 | Phase 8 — Sobrevivência | Pending |
+| SURV-05 | Phase 8 — Sobrevivência | Pending |
+| MED-01 | Phase 9 — Capacidade medida do repassador | Pending |
+| MED-02 | Phase 9 — Capacidade medida do repassador | Pending |
+| MED-03 | Phase 9 — Capacidade medida do repassador | Pending |
+| MED-07 | Phase 9 — Capacidade medida do repassador | Pending |
+| MED-04 | Phase 10 — Escolha ponderada e histerese | Pending |
+| MED-05 | Phase 10 — Escolha ponderada e histerese | Pending |
+| MED-06 | Phase 10 — Escolha ponderada e histerese | Pending |
+| INST-01 | Phase 11 — Instrumentação de banda e TURN | Pending |
+| INST-02 | Phase 11 — Instrumentação de banda e TURN | Pending |
+| INST-03 | Phase 11 — Instrumentação de banda e TURN | Pending |
+| INST-04 | Phase 11 — Instrumentação de banda e TURN | Pending |
+| INST-05 | Phase 12 — Visibilidade da árvore e transparência | Pending |
+| TRANSP-01 | Phase 12 — Visibilidade da árvore e transparência | Pending |
 
 **Coverage:**
-- v1 requirements: 46 total
-- Mapped to phases: 0
-- Unmapped: 46 ⚠️ (roadmap ainda não criado)
+- v1 requirements: 47 total
+- Mapped to phases: 47
+- Unmapped: 0
+
+> Correção de contagem: este documento declarava 46 requisitos v1 na inicialização.
+> A contagem por ID devolve 47 (SPIKE 6 + UI 3 + CTRL 3 + TOPO 8 + FWD 4 + SIG 5 +
+> SURV 5 + MED 7 + INST 5 + TRANSP 1). Nenhum requisito foi adicionado nem removido —
+> só o total estava errado.
 
 ## Definition of Done
 
@@ -156,4 +198,4 @@ O milestone fecha quando as quatro medidas escolhidas pelo usuário respondem:
 
 ---
 *Requirements defined: 2026-08-20*
-*Last updated: 2026-08-20 after initialization*
+*Last updated: 2026-08-20 after roadmap creation (47/47 mapeados em 12 fases)*
