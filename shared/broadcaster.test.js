@@ -1122,6 +1122,101 @@ describe('conexão direta', () => {
     expect(contexto.encoder.codificados.length).toBeGreaterThan(parado);
   });
 
+  // ------------------------------------------------------------ mais de um
+  //
+  // Todo teste acima usa `p1` e só `p1`. O mapa do código já apontava que não
+  // existe cobertura nenhuma para o leque do WebRTC, e a acusação que motivou
+  // este bloco foi direta: "só dá para um ver a tela por vez". Se o transmissor
+  // atende um espectador e ignora o segundo, é aqui que aparece.
+
+  it('atende dois espectadores, com uma conexão e uma oferta para cada', async () => {
+    const { ws } = await noAr();
+    ws.receber({ type: 'rtc-want', peer: 'p1' });
+    await respirar(8);
+    ws.receber({ type: 'rtc-want', peer: 'p2' });
+    await respirar(8);
+
+    expect(peers).toHaveLength(2);
+    expect(peers[0].faixas).toHaveLength(1);
+    expect(peers[1].faixas).toHaveLength(1);
+
+    const ofertas = ws.mensagens().filter((m) => m.type === 'rtc' && m.payload?.kind === 'offer');
+    expect(ofertas.map((o) => o.peer)).toEqual(['p1', 'p2']);
+  });
+
+  it('atende dois que chegam no mesmo instante, sem um comer o outro', async () => {
+    // `abrirPeer` tem um `await iceServers()` no meio. Dois convites chegando
+    // antes dele resolver disputam o mesmo trecho — e é exatamente o formato de
+    // corrida que faz "o segundo espectador não vê nada".
+    const { ws } = await noAr();
+    ws.receber({ type: 'rtc-want', peer: 'p1' });
+    ws.receber({ type: 'rtc-want', peer: 'p2' });
+    await respirar(12);
+
+    expect(peers).toHaveLength(2);
+    const ofertas = ws.mensagens().filter((m) => m.type === 'rtc' && m.payload?.kind === 'offer');
+    expect(new Set(ofertas.map((o) => o.peer))).toEqual(new Set(['p1', 'p2']));
+  });
+
+  it('a resposta de um espectador não é aplicada na conexão do outro', async () => {
+    const { ws } = await noAr();
+    ws.receber({ type: 'rtc-want', peer: 'p1' });
+    await respirar(8);
+    ws.receber({ type: 'rtc-want', peer: 'p2' });
+    await respirar(8);
+
+    ws.receber({
+      type: 'rtc',
+      peer: 'p2',
+      payload: { kind: 'answer', sdp: { type: 'answer', sdp: 'v=0 do p2' } },
+    });
+    await respirar(4);
+
+    expect(peers[0].remotas).toHaveLength(0);
+    expect(peers[1].remotas).toHaveLength(1);
+  });
+
+  it('fechar um espectador não derruba o outro', async () => {
+    const { ws } = await noAr();
+    ws.receber({ type: 'rtc-want', peer: 'p1' });
+    await respirar(8);
+    ws.receber({ type: 'rtc-want', peer: 'p2' });
+    await respirar(8);
+
+    ws.receber({ type: 'rtc-bye', peer: 'p1' });
+    await respirar(4);
+
+    expect(peers[0].fechado).toBe(true);
+    expect(peers[1].fechado).toBe(false);
+  });
+
+  it('cinco espectadores rendem cinco conexões', async () => {
+    const { ws } = await noAr();
+    for (const p of ['p1', 'p2', 'p3', 'p4', 'p5']) {
+      ws.receber({ type: 'rtc-want', peer: p });
+      await respirar(8);
+    }
+
+    expect(peers).toHaveLength(5);
+    const ofertas = ws.mensagens().filter((m) => m.type === 'rtc' && m.payload?.kind === 'offer');
+    expect(ofertas.map((o) => o.peer)).toEqual(['p1', 'p2', 'p3', 'p4', 'p5']);
+  });
+
+  it('a troca de tela alcança TODOS os peers, não só o primeiro', async () => {
+    const { b, ws } = await noAr();
+    ws.receber({ type: 'rtc-want', peer: 'p1' });
+    await respirar(8);
+    ws.receber({ type: 'rtc-want', peer: 'p2' });
+    await respirar(8);
+
+    prepararCaptura(telaSimples());
+    await b.changeScreen();
+    await respirar(4);
+
+    expect(peers[0].senders[0].substituidas).toHaveLength(1);
+    expect(peers[1].senders[0].substituidas).toHaveLength(1);
+  });
+
   it('troca a faixa dos peers sem renegociar quando a tela muda', async () => {
     // replaceTrack nao mexe no SDP: quem assiste segue na mesma conexao e so
     // ve a imagem mudar. Renegociar custaria um ICE novo por espectador.

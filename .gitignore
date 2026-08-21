@@ -9,3 +9,7 @@ coverage/
 
 # O zip de deploy, montado a partir da propria pasta. Nao e fonte de nada.
 *.zip
+
+# Clone aninhado do remote de staging. Ja entrou num "git add -A" uma vez e
+# levou o repositorio inteiro junto; nao e fonte, e um checkout paralelo.
+discord-stg/
