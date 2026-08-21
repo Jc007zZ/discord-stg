@@ -1154,7 +1154,11 @@ describe('conexão direta', () => {
     // Sem respirar: o convite e o candidato caem no mesmo instante, com o
     // `await iceServers()` ainda pendurado no meio.
     ws.receber({ type: 'rtc-want', peer: 'p1' });
-    ws.receber({ type: 'rtc', peer: 'p1', payload: { kind: 'ice', candidate: { candidate: 'cedo' } } });
+    ws.receber({
+      type: 'rtc',
+      peer: 'p1',
+      payload: { kind: 'ice', candidate: { candidate: 'cedo' } },
+    });
     await respirar(8);
 
     // Ainda não: sem descrição remota o candidato seria recusado.
@@ -1175,7 +1179,11 @@ describe('conexão direta', () => {
     ws.receber({ type: 'rtc-want', peer: 'p1' });
     await respirar(8);
 
-    ws.receber({ type: 'rtc', peer: 'p1', payload: { kind: 'ice', candidate: { candidate: 'meio' } } });
+    ws.receber({
+      type: 'rtc',
+      peer: 'p1',
+      payload: { kind: 'ice', candidate: { candidate: 'meio' } },
+    });
     await respirar(4);
     expect(peers[0].candidatos).toHaveLength(0);
 
@@ -1195,7 +1203,11 @@ describe('conexão direta', () => {
     const { ws } = await noAr();
     ws.receber({ type: 'rtc-want', peer: 'p1' });
     for (const nome of ['host', 'srflx', 'relay']) {
-      ws.receber({ type: 'rtc', peer: 'p1', payload: { kind: 'ice', candidate: { candidate: nome } } });
+      ws.receber({
+        type: 'rtc',
+        peer: 'p1',
+        payload: { kind: 'ice', candidate: { candidate: nome } },
+      });
     }
     await respirar(8);
 
@@ -1212,9 +1224,17 @@ describe('conexão direta', () => {
   it('a fila de um espectador não vaza para a conexão do outro', async () => {
     const { ws } = await noAr();
     ws.receber({ type: 'rtc-want', peer: 'p1' });
-    ws.receber({ type: 'rtc', peer: 'p1', payload: { kind: 'ice', candidate: { candidate: 'do-p1' } } });
+    ws.receber({
+      type: 'rtc',
+      peer: 'p1',
+      payload: { kind: 'ice', candidate: { candidate: 'do-p1' } },
+    });
     ws.receber({ type: 'rtc-want', peer: 'p2' });
-    ws.receber({ type: 'rtc', peer: 'p2', payload: { kind: 'ice', candidate: { candidate: 'do-p2' } } });
+    ws.receber({
+      type: 'rtc',
+      peer: 'p2',
+      payload: { kind: 'ice', candidate: { candidate: 'do-p2' } },
+    });
     await respirar(12);
 
     for (const p of ['p1', 'p2']) {
@@ -1234,7 +1254,11 @@ describe('conexão direta', () => {
     const { ws } = await noAr();
     ws.receber({ type: 'rtc-want', peer: 'p1' });
     for (let i = 0; i < 200; i++) {
-      ws.receber({ type: 'rtc', peer: 'p1', payload: { kind: 'ice', candidate: { candidate: `c${i}` } } });
+      ws.receber({
+        type: 'rtc',
+        peer: 'p1',
+        payload: { kind: 'ice', candidate: { candidate: `c${i}` } },
+      });
     }
     await respirar(8);
 
@@ -1252,7 +1276,11 @@ describe('conexão direta', () => {
   it('espectador que desiste antes de conectar não deixa fila para trás', async () => {
     const { b, ws } = await noAr();
     ws.receber({ type: 'rtc-want', peer: 'p1' });
-    ws.receber({ type: 'rtc', peer: 'p1', payload: { kind: 'ice', candidate: { candidate: 'orfao' } } });
+    ws.receber({
+      type: 'rtc',
+      peer: 'p1',
+      payload: { kind: 'ice', candidate: { candidate: 'orfao' } },
+    });
     ws.receber({ type: 'rtc-bye', peer: 'p1' });
     await respirar(12);
 
