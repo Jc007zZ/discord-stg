@@ -298,3 +298,111 @@ export async function resumoPeer(pc) {
 
   return { rtt, relay };
 }
+
+/**
+ * Quantos candidatos guardar por conexão antes de começar a descartar.
+ *
+ * A fila só drena quando a descrição remota entra. Se ela nunca entrar — o
+ * outro lado sumiu, a negociação morreu no meio —, sem teto isto cresceria até
+ * a aba acabar. Sessenta e quatro é folgado: uma negociação normal traz de
+ * meia dúzia a vinte candidatos.
+ */
+export const MAX_ICE_PENDENTES = 64;
+
+/**
+ * Fila de candidatos ICE que chegaram antes de haver onde aplicá-los.
+ *
+ * Trickle ICE não espera: assim que um lado tem descrição local, ele começa a
+ * mandar candidato. Do outro lado, entre receber a oferta (ou o convite) e
+ * existir um `RTCPeerConnection` com descrição remota aplicada, há um
+ * `await iceServers()` — que é uma busca de rede. Tudo que cai nessa janela
+ * seria recusado por `addIceCandidate`.
+ *
+ * Os dois lados descartavam esses candidatos, cada um com um comentário
+ * afirmando que a situação se recuperava sozinha. Não se recuperava: o
+ * candidato seguinte é outro candidato, não uma segunda chance do que se
+ * perdeu. E os primeiros a chegar são os host — os de rede local, os que fecham
+ * conexão mais rápido e com menos esforço.
+ *
+ * O sintoma era conexão direta inconstante: a mesma pessoa, na mesma rede,
+ * fechando numa tentativa e não fechando na outra, conforme a corrida entre a
+ * busca do `/api/ice` e a pressa do outro lado. Com o relay ligado ninguém
+ * percebia, porque ele cobria o buraco. Com `P2P_ONLY`, virava carregamento
+ * eterno.
+ *
+ * Mora aqui, e não nos dois arquivos que precisam dela, porque escrita duas
+ * vezes ela seria consertada uma vez só — e o defeito voltaria de um lado.
+ */
+export function criarFilaIce({ max = MAX_ICE_PENDENTES } = {}) {
+  const filas = new Map();
+
+  return {
+    /** Guarda um candidato sob esta chave, respeitando o teto. */
+    guardar(chave, candidate) {
+      if (!candidate) return false;
+      const fila = filas.get(chave) ?? [];
+      if (fila.length >= max) return false;
+      fila.push(candidate);
+      filas.set(chave, fila);
+      return true;
+    },
+
+    /**
+     * Aplica em ordem tudo o que estava guardado.
+     *
+     * A ordem importa: o ICE tenta os pares na ordem em que os conhece, e os
+     * host vêm primeiro justamente por serem os que fecham mais rápido.
+     *
+     * `aindaVale` é consultado entre um candidato e outro porque aplicar é
+     * assíncrono: a conexão pode morrer no meio da drenagem, e continuar
+     * despejando candidato num peer fechado só gera exceção.
+     */
+    async drenar(chave, pc, aindaVale = () => true) {
+      const fila = filas.get(chave);
+      if (!fila) return 0;
+      filas.delete(chave);
+
+      let aplicados = 0;
+      for (const candidate of fila) {
+        if (!aindaVale()) return aplicados;
+        try {
+          await pc.addIceCandidate(candidate);
+          aplicados++;
+        } catch (err) {
+          console.warn('[rtc] candidato guardado recusado:', err.message);
+        }
+      }
+      return aplicados;
+    },
+
+    /**
+     * Esquece a fila desta chave.
+     *
+     * Chamado ao fechar um peer: candidato guardado descreve um caminho da
+     * negociação que está morrendo, e herdá-lo na próxima seria oferecer ao ICE
+     * um endereço que já não atende.
+     */
+    esquecer(chave) {
+      filas.delete(chave);
+    },
+
+    limpar() {
+      filas.clear();
+    },
+
+    /** Quantos estão guardados. Só para teste e diagnóstico. */
+    tamanho(chave) {
+      return filas.get(chave)?.length ?? 0;
+    },
+  };
+}
+
+/**
+ * O candidato precisa esperar?
+ *
+ * Sem peer não há onde aplicar; sem descrição remota, `addIceCandidate` recusa.
+ * As duas condições são a mesma janela vista de dois momentos.
+ */
+export function guardarPorEnquanto(pc) {
+  return !pc || !pc.remoteDescription;
+}

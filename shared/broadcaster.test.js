@@ -279,6 +279,11 @@ class PeerFalso {
   }
   async setRemoteDescription(d) {
     this.remotas.push(d);
+    // O navegador de verdade recusa `addIceCandidate` enquanto isto é nulo, e o
+    // código depende disso para saber quando guardar candidato em vez de
+    // aplicá-lo. Um dublê que não expusesse a propriedade deixaria a decisão
+    // sem efeito no teste — e o defeito voltaria sem ninguém ver.
+    this.remoteDescription = d;
   }
   async addIceCandidate(c) {
     this.candidatos.push(c);
@@ -1049,9 +1054,22 @@ describe('conexão direta', () => {
   });
 
   it('aplica o candidato que vem do espectador', async () => {
+    // A resposta vem antes de propósito. Antes este teste mandava o candidato
+    // sem ela e esperava que fosse aplicado — o que um navegador de verdade
+    // recusa, porque não existe descrição remota onde encaixá-lo. O dublê não
+    // recusava, então o teste dava por bom justamente o caminho que fazia a
+    // conexão direta ser inconstante. Candidato antes da resposta agora tem
+    // teste próprio, logo abaixo.
     const { ws } = await noAr();
     ws.receber({ type: 'rtc-want', peer: 'p1' });
     await respirar(8);
+
+    ws.receber({
+      type: 'rtc',
+      peer: 'p1',
+      payload: { kind: 'answer', sdp: { type: 'answer', sdp: 'v=0' } },
+    });
+    await respirar(4);
 
     ws.receber({
       type: 'rtc',
@@ -1120,6 +1138,137 @@ describe('conexão direta', () => {
     await umQuadro(contexto);
 
     expect(contexto.encoder.codificados.length).toBeGreaterThan(parado);
+  });
+
+  // ------------------------------------------- candidato que chega cedo demais
+  //
+  // Quem assiste responde a oferta e já começa a trickle dos próprios
+  // candidatos. Aqui, entre o convite e o peer existir, há um `await
+  // iceServers()`. Tudo que chega nessa janela não tinha onde ser aplicado — e
+  // era descartado. Como o descarte às vezes custava a conexão e às vezes não,
+  // o sintoma era "conecta às vezes", que é o pior formato de defeito.
+
+  it('guarda o candidato que chega antes do peer existir, e o aplica depois', async () => {
+    const { ws } = await noAr();
+
+    // Sem respirar: o convite e o candidato caem no mesmo instante, com o
+    // `await iceServers()` ainda pendurado no meio.
+    ws.receber({ type: 'rtc-want', peer: 'p1' });
+    ws.receber({ type: 'rtc', peer: 'p1', payload: { kind: 'ice', candidate: { candidate: 'cedo' } } });
+    await respirar(8);
+
+    // Ainda não: sem descrição remota o candidato seria recusado.
+    expect(peers[0].candidatos).toHaveLength(0);
+
+    ws.receber({
+      type: 'rtc',
+      peer: 'p1',
+      payload: { kind: 'answer', sdp: { type: 'answer', sdp: 'v=0' } },
+    });
+    await respirar(8);
+
+    expect(peers[0].candidatos).toEqual([{ candidate: 'cedo' }]);
+  });
+
+  it('guarda também o que chega entre o peer nascer e a resposta ser aplicada', async () => {
+    const { ws } = await noAr();
+    ws.receber({ type: 'rtc-want', peer: 'p1' });
+    await respirar(8);
+
+    ws.receber({ type: 'rtc', peer: 'p1', payload: { kind: 'ice', candidate: { candidate: 'meio' } } });
+    await respirar(4);
+    expect(peers[0].candidatos).toHaveLength(0);
+
+    ws.receber({
+      type: 'rtc',
+      peer: 'p1',
+      payload: { kind: 'answer', sdp: { type: 'answer', sdp: 'v=0' } },
+    });
+    await respirar(8);
+
+    expect(peers[0].candidatos).toEqual([{ candidate: 'meio' }]);
+  });
+
+  it('preserva a ordem de chegada dos candidatos guardados', async () => {
+    // Ordem importa: o ICE tenta os pares na ordem em que os conhece, e os host
+    // vêm primeiro justamente por serem os que fecham mais rápido.
+    const { ws } = await noAr();
+    ws.receber({ type: 'rtc-want', peer: 'p1' });
+    for (const nome of ['host', 'srflx', 'relay']) {
+      ws.receber({ type: 'rtc', peer: 'p1', payload: { kind: 'ice', candidate: { candidate: nome } } });
+    }
+    await respirar(8);
+
+    ws.receber({
+      type: 'rtc',
+      peer: 'p1',
+      payload: { kind: 'answer', sdp: { type: 'answer', sdp: 'v=0' } },
+    });
+    await respirar(8);
+
+    expect(peers[0].candidatos.map((c) => c.candidate)).toEqual(['host', 'srflx', 'relay']);
+  });
+
+  it('a fila de um espectador não vaza para a conexão do outro', async () => {
+    const { ws } = await noAr();
+    ws.receber({ type: 'rtc-want', peer: 'p1' });
+    ws.receber({ type: 'rtc', peer: 'p1', payload: { kind: 'ice', candidate: { candidate: 'do-p1' } } });
+    ws.receber({ type: 'rtc-want', peer: 'p2' });
+    ws.receber({ type: 'rtc', peer: 'p2', payload: { kind: 'ice', candidate: { candidate: 'do-p2' } } });
+    await respirar(12);
+
+    for (const p of ['p1', 'p2']) {
+      ws.receber({
+        type: 'rtc',
+        peer: p,
+        payload: { kind: 'answer', sdp: { type: 'answer', sdp: 'v=0' } },
+      });
+    }
+    await respirar(12);
+
+    expect(peers[0].candidatos).toEqual([{ candidate: 'do-p1' }]);
+    expect(peers[1].candidatos).toEqual([{ candidate: 'do-p2' }]);
+  });
+
+  it('a fila não cresce sem teto quando a resposta nunca vem', async () => {
+    const { ws } = await noAr();
+    ws.receber({ type: 'rtc-want', peer: 'p1' });
+    for (let i = 0; i < 200; i++) {
+      ws.receber({ type: 'rtc', peer: 'p1', payload: { kind: 'ice', candidate: { candidate: `c${i}` } } });
+    }
+    await respirar(8);
+
+    ws.receber({
+      type: 'rtc',
+      peer: 'p1',
+      payload: { kind: 'answer', sdp: { type: 'answer', sdp: 'v=0' } },
+    });
+    await respirar(20);
+
+    expect(peers[0].candidatos.length).toBeLessThanOrEqual(64);
+    expect(peers[0].candidatos.length).toBeGreaterThan(0);
+  });
+
+  it('espectador que desiste antes de conectar não deixa fila para trás', async () => {
+    const { b, ws } = await noAr();
+    ws.receber({ type: 'rtc-want', peer: 'p1' });
+    ws.receber({ type: 'rtc', peer: 'p1', payload: { kind: 'ice', candidate: { candidate: 'orfao' } } });
+    ws.receber({ type: 'rtc-bye', peer: 'p1' });
+    await respirar(12);
+
+    // Um convite novo com o mesmo nome não pode herdar o candidato do anterior:
+    // ele descreve um caminho que já não existe.
+    ws.receber({ type: 'rtc-want', peer: 'p1' });
+    await respirar(8);
+    ws.receber({
+      type: 'rtc',
+      peer: 'p1',
+      payload: { kind: 'answer', sdp: { type: 'answer', sdp: 'v=0' } },
+    });
+    await respirar(8);
+
+    expect(peers.at(-1).candidatos).toHaveLength(0);
+    b.stop();
   });
 
   // ------------------------------------------------------------ mais de um

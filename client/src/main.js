@@ -10,6 +10,8 @@ import {
   diagnosticoWebRTC,
   origemDoPeer,
   resumoPeer,
+  criarFilaIce,
+  guardarPorEnquanto,
   MORTO,
   PRAZO_CONEXAO_MS,
 } from '../../shared/rtc.js';
@@ -104,6 +106,8 @@ let volumeAntes = volume || 1;
 // porque a grade é reconstruída a cada mudança de estado da sala, e a escolha
 // de quem assiste precisa sobreviver a isso.
 let activeSlot = null;
+// Candidatos ICE que chegaram antes do peer deles existir. Ver rtc.js.
+const filaIce = criarFilaIce();
 let telaCheia = false;
 // O que o link da atividade pediu: qual tela no palco e se já em tela cheia.
 // Não dá para aplicar no arranque — a sala ainda não tem transmissão nenhuma, e
@@ -937,12 +941,14 @@ function openStream(slot, userId) {
   video.muted = true;
 
   const s = {
+    slot,
     userId,
     canvas,
     video,
     // Conexão direta com quem transmite, quando existir. Null é o normal: ela
     // pode nunca fechar, e nesse caso tudo continua pelo relay.
     pc: null,
+
     // Verdadeiro quando os quadros já estão chegando por ela. É esta bandeira,
     // e não o estado do RTCPeerConnection, que decide o que vai para a tela.
     viaRtc: false,
@@ -1075,6 +1081,11 @@ async function receberOferta(slot, sdp) {
     s.pc = pc;
 
     await pc.setRemoteDescription(sdp);
+    // Agora existe onde aplicar o que chegou enquanto isto era montado. Vem
+    // antes da resposta de propósito: os candidatos guardados são os host, e
+    // quanto antes o ICE os tiver, antes ele fecha.
+    await filaIce.drenar(slot, pc, () => streams.get(slot)?.pc === pc);
+
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     enviarRtc(slot, { kind: 'answer', sdp: pc.localDescription });
@@ -1094,13 +1105,30 @@ async function receberOferta(slot, sdp) {
   }
 }
 
+/**
+ * Candidato ICE do outro lado — e ele quase sempre chega cedo demais.
+ *
+ * Quem transmite manda a oferta e começa a cuspir candidatos no mesmo instante:
+ * é assim que o trickle ICE funciona, ele não espera resposta. Deste lado, entre
+ * receber a oferta e existir um `RTCPeerConnection` com descrição remota, há um
+ * `await iceServers()` que é uma busca de rede. Tudo que chega nessa janela não
+ * tem onde ser aplicado — e era descartado. Ver a nota longa em rtc.js.
+ */
 async function receberIce(slot, candidate) {
-  const pc = streams.get(slot)?.pc;
-  if (!pc || !candidate) return;
+  const s = streams.get(slot);
+  if (!s || !candidate) return;
+
+  // Sem descrição remota, `addIceCandidate` lança e o candidato se perde. Vale
+  // para o peer que ainda não nasceu e para o que nasceu mas ainda não aceitou
+  // a oferta — os dois são a mesma janela.
+  if (guardarPorEnquanto(s.pc)) {
+    filaIce.guardar(slot, candidate);
+    return;
+  }
+
   try {
-    await pc.addIceCandidate(candidate);
+    await s.pc.addIceCandidate(candidate);
   } catch (err) {
-    // Candidato fora de ordem é rotina e se recupera sozinho no próximo.
     console.warn('[rtc]', err.message);
   }
 }
@@ -1167,6 +1195,9 @@ function fecharPeer(s) {
   clearTimeout(s.prazoRtc);
   s.prazoRtc = null;
   s.viaRtc = false;
+  // Candidato guardado pertence à negociação que está morrendo. Aplicá-lo na
+  // próxima não descreveria caminho nenhum que ainda exista.
+  filaIce.esquecer(s.slot);
   s.video.srcObject = null;
   s.video.muted = true;
   if (!s.pc) return;

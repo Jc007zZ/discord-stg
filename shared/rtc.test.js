@@ -15,7 +15,16 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ajustarEnvio, criarPeer, MORTO, PRAZO_CONEXAO_MS, resumoPeer } from './rtc.js';
+import {
+  ajustarEnvio,
+  criarFilaIce,
+  criarPeer,
+  guardarPorEnquanto,
+  MAX_ICE_PENDENTES,
+  MORTO,
+  PRAZO_CONEXAO_MS,
+  resumoPeer,
+} from './rtc.js';
 
 const STUN = 'stun:stun.l.google.com:19302';
 
@@ -463,5 +472,145 @@ describe('resumoPeer', () => {
     };
 
     expect(await resumoPeer(pc)).toEqual({ rtt: null, relay: false });
+  });
+});
+
+/**
+ * A fila de candidatos ICE.
+ *
+ * Ela existe por causa de um defeito que se escondia bem: candidato que chegava
+ * antes da descrição remota era descartado, com um comentário — meu — afirmando
+ * que a situação se recuperava sozinha. Não se recuperava. O sintoma era
+ * conexão direta que fecha numa tentativa e não fecha na seguinte, na mesma
+ * rede e com a mesma pessoa.
+ */
+describe('fila de candidatos ICE', () => {
+  const peerFalso = () => {
+    const aplicados = [];
+    return {
+      aplicados,
+      addIceCandidate: async (c) => {
+        aplicados.push(c);
+      },
+    };
+  };
+
+  it('guarda enquanto não há peer, e enquanto não há descrição remota', () => {
+    expect(guardarPorEnquanto(null)).toBe(true);
+    expect(guardarPorEnquanto(undefined)).toBe(true);
+    expect(guardarPorEnquanto({ remoteDescription: null })).toBe(true);
+    expect(guardarPorEnquanto({ remoteDescription: { type: 'answer' } })).toBe(false);
+  });
+
+  it('devolve na drenagem o que guardou, em ordem', async () => {
+    const fila = criarFilaIce();
+    const pc = peerFalso();
+    // Ordem importa: o ICE tenta os pares na ordem em que os conhece, e os host
+    // vêm primeiro justamente por fecharem mais rápido.
+    for (const nome of ['host', 'srflx', 'relay']) fila.guardar('p1', { candidate: nome });
+
+    expect(await fila.drenar('p1', pc)).toBe(3);
+    expect(pc.aplicados.map((c) => c.candidate)).toEqual(['host', 'srflx', 'relay']);
+  });
+
+  it('drenar duas vezes não aplica duas vezes', async () => {
+    const fila = criarFilaIce();
+    const pc = peerFalso();
+    fila.guardar('p1', { candidate: 'a' });
+
+    await fila.drenar('p1', pc);
+    await fila.drenar('p1', pc);
+
+    expect(pc.aplicados).toHaveLength(1);
+  });
+
+  it('cada chave tem a própria fila', async () => {
+    const fila = criarFilaIce();
+    const um = peerFalso();
+    const outro = peerFalso();
+    fila.guardar('p1', { candidate: 'do-p1' });
+    fila.guardar('p2', { candidate: 'do-p2' });
+
+    await fila.drenar('p1', um);
+    await fila.drenar('p2', outro);
+
+    expect(um.aplicados).toEqual([{ candidate: 'do-p1' }]);
+    expect(outro.aplicados).toEqual([{ candidate: 'do-p2' }]);
+  });
+
+  it('para de crescer no teto, para não consumir a aba quando a resposta não vem', () => {
+    const fila = criarFilaIce({ max: 3 });
+    for (let i = 0; i < 50; i++) fila.guardar('p1', { candidate: `c${i}` });
+
+    expect(fila.tamanho('p1')).toBe(3);
+  });
+
+  it('o teto padrão é o exportado, para o número morar num lugar só', () => {
+    const fila = criarFilaIce();
+    for (let i = 0; i < MAX_ICE_PENDENTES + 10; i++) fila.guardar('p1', { candidate: `c${i}` });
+
+    expect(fila.tamanho('p1')).toBe(MAX_ICE_PENDENTES);
+  });
+
+  it('esquecer apaga a fila de uma negociação que morreu', async () => {
+    const fila = criarFilaIce();
+    const pc = peerFalso();
+    fila.guardar('p1', { candidate: 'velho' });
+
+    fila.esquecer('p1');
+    await fila.drenar('p1', pc);
+
+    // Herdar o candidato na negociação seguinte seria oferecer ao ICE um
+    // endereço que já não atende.
+    expect(pc.aplicados).toHaveLength(0);
+  });
+
+  it('para no meio da drenagem quando a conexão morre', async () => {
+    const fila = criarFilaIce();
+    const pc = peerFalso();
+    for (const nome of ['a', 'b', 'c']) fila.guardar('p1', { candidate: nome });
+
+    let vivo = true;
+    pc.addIceCandidate = async (c) => {
+      pc.aplicados.push(c);
+      vivo = false;
+    };
+
+    // Aplicar é assíncrono; sem esta checagem entre um e outro, continuaríamos
+    // despejando candidato num peer já fechado.
+    expect(await fila.drenar('p1', pc, () => vivo)).toBe(1);
+    expect(pc.aplicados).toHaveLength(1);
+  });
+
+  it('um candidato recusado não impede os seguintes', async () => {
+    const fila = criarFilaIce();
+    const pc = peerFalso();
+    for (const nome of ['ruim', 'bom']) fila.guardar('p1', { candidate: nome });
+    pc.addIceCandidate = async (c) => {
+      if (c.candidate === 'ruim') throw new Error('malformado');
+      pc.aplicados.push(c);
+    };
+
+    expect(await fila.drenar('p1', pc)).toBe(1);
+    expect(pc.aplicados).toEqual([{ candidate: 'bom' }]);
+  });
+
+  it('candidato vazio não ocupa vaga na fila', () => {
+    const fila = criarFilaIce();
+    fila.guardar('p1', null);
+    fila.guardar('p1', undefined);
+
+    expect(fila.tamanho('p1')).toBe(0);
+  });
+
+  it('limpar zera tudo de uma vez, para quando a transmissão acaba', () => {
+    const fila = criarFilaIce();
+    fila.guardar('p1', { candidate: 'a' });
+    fila.guardar('p2', { candidate: 'b' });
+
+    fila.limpar();
+
+    expect(fila.tamanho('p1')).toBe(0);
+    expect(fila.tamanho('p2')).toBe(0);
   });
 });

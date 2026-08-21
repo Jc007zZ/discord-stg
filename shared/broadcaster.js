@@ -1,4 +1,12 @@
-import { iceServers, criarPeer, ajustarEnvio, suportaWebRTC, MORTO } from './rtc.js';
+import {
+  iceServers,
+  criarPeer,
+  ajustarEnvio,
+  suportaWebRTC,
+  criarFilaIce,
+  guardarPorEnquanto,
+  MORTO,
+} from './rtc.js';
 
 /**
  * Pipeline de transmissão: captura → codifica → envia.
@@ -262,6 +270,8 @@ export function createBroadcaster({
   // Uma conexão direta por espectador. O servidor nomeia cada um; aqui o nome
   // é só a chave — quem é a pessoa não interessa para negociar transporte.
   const peers = new Map(); // peerId -> RTCPeerConnection
+  // Candidatos ICE que chegaram antes do peer deles existir. Ver rtc.js.
+  const filaIce = criarFilaIce();
   // Quadros ainda precisam subir pelo relay? Falso só quando todo mundo que
   // assiste está na conexão direta, e o servidor é quem sabe disso.
   let enviarChunks = true;
@@ -1064,23 +1074,35 @@ export function createBroadcaster({
   }
 
   async function receberRtc(peerId, payload) {
+    if (!peerId || !payload) return;
     const pc = peers.get(peerId);
-    if (!pc || !payload) return;
+
+    // Candidato que chega antes de haver onde aplicá-lo espera na fila. Guardar
+    // é o que separa "conecta" de "conecta às vezes" — ver a nota em rtc.js.
+    if (payload.kind === 'ice' && payload.candidate && guardarPorEnquanto(pc)) {
+      filaIce.guardar(peerId, payload.candidate);
+      return;
+    }
+    if (!pc) return;
 
     try {
       if (payload.kind === 'answer' && payload.sdp) {
         await pc.setRemoteDescription(payload.sdp);
+        await filaIce.drenar(peerId, pc, () => peers.get(peerId) === pc);
       } else if (payload.kind === 'ice' && payload.candidate) {
         await pc.addIceCandidate(payload.candidate);
       }
     } catch (err) {
-      // Candidato que chega antes da descrição remota é normal e recuperável;
-      // derrubar a conexão por causa dele custaria uma renegociação inteira.
       console.warn('[rtc]', err.message);
     }
   }
 
   function fecharPeer(peerId) {
+    // Antes do `pc`: um espectador pode ir embora enquanto o peer dele ainda
+    // está sendo montado, e aí a fila é tudo o que existe dele aqui. Sair sem
+    // limpá-la deixaria os candidatos presos até a transmissão acabar.
+    filaIce.esquecer(peerId);
+
     const pc = peers.get(peerId);
     if (!pc) return;
     peers.delete(peerId);
@@ -1093,6 +1115,8 @@ export function createBroadcaster({
 
   function fecharPeers() {
     for (const peerId of [...peers.keys()]) fecharPeer(peerId);
+    // Quem nunca chegou a ter peer não aparece em `peers`, mas pode ter fila.
+    filaIce.limpar();
     enviarChunks = true;
   }
 
