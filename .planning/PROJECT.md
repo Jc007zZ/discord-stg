@@ -48,10 +48,13 @@ nem a subida de quem transmite — e sem que ninguém fique na tela preta.
 - [ ] **R1** — Teto de leque no transmissor, com transbordo para o relay: nenhum
       transmissor sobe mais que N × bitrate, e quem não couber assiste pelo relay
       em vez de degradar a sala inteira
-- [ ] **R2** — Leque derivado de capacidade medida (`availableOutgoingBitrate`),
-      não de constante chutada; encolhe quando as estatísticas do filho mostram perda
+- [ ] **R2** — Leque derivado de capacidade medida, não de constante chutada;
+      mede **subida e CPU**, cresce devagar, encolhe rápido ao primeiro relatório
+      de perda. `availableOutgoingBitrate`/`qualityLimitationReason` só existem no
+      Chromium — o site precisa de caminho alternativo por `bytesSent` + perda
 - [ ] **R3** — Repasse de faixa: um espectador aceita filhos e repassa a faixa
-      recebida sem decodificar nem recodificar
+      recebida. **Custa decodificar + recodificar** — não existe passagem crua no
+      navegador (ver `.planning/research/STACK.md`)
 - [ ] **R4** — Servidor dono da topologia: mantém a árvore, atribui pai, detecta
       saída, adota órfão. Filho nunca escolhe o próprio pai (evita ciclo)
 - [ ] **R5** — Escolha de pai ponderada, isolada numa função pura
@@ -115,10 +118,34 @@ de leque, mas não o elimina.
 leque 3 e profundidade 2 cabem 12; com leque 4, 20. Em 2 ou 3 espectadores a
 árvore **é** a estrela de hoje — profundidade zero, nenhum caminho novo percorrido.
 
-**Peça que decide tudo.** Um espectador consegue repassar a faixa recebida para
-uma nova `RTCPeerConnection` via `addTrack`, sem decodificar e sem recodificar.
-Se isso não se sustentar, a árvore inteira cai e o escopo vira R1+R2 apenas.
-É o primeiro item a provar.
+**Peça que decide tudo — corrigida pela pesquisa.** Assumimos, ao desenhar, que
+um espectador repassaria a faixa recebida via `addTrack` sem decodificar nem
+recodificar. **Isso está errado.** O navegador não expõe caminho de passagem: a
+faixa remota chega decodificada, e colocá-la numa segunda `RTCPeerConnection`
+instancia um encoder novo. É exatamente por isso que SFU existe como categoria
+separada de arquitetura. Confirmado por dois agentes independentes, com fonte
+primária no exemplo oficial `multiple-relay` do `webrtc/samples` do Google.
+
+Consequências, e nenhuma delas mata a árvore:
+
+- **O objetivo de banda sobrevive intacto.** A subida do transmissor continua
+  aliviada; o repassador assume o custo de rede como planejado.
+- **Surge um segundo recurso escasso: CPU do repassador.** Decodificar 1080p e
+  recodificar 1080p na máquina de quem assiste. Com encoder de hardware é
+  viável; em software a 1080p é o mesmo buraco que o `nivelH264` consertou.
+- **Há perda de geração.** O neto vê pior que o filho.
+- **Em compensação, o problema mais difícil da lista some.** Como o repassador
+  tem encoder de verdade, o PLI padrão do WebRTC responde sozinho ao neto que
+  entra no meio da transmissão. Keyframe automático, custo zero de protocolo. O
+  pedido pelo WebSocket e o keyframe periódico de 3 s viram rede de segurança em
+  vez de mecanismo principal. Ressalva: existe issue conhecida no libwebrtc sobre
+  encoders H.264 nem sempre honrarem PLI com presteza
+  (`issues.webrtc.org/issues/42220637`) — vira teste, não suposição.
+
+A pergunta do spike deixa de ser "é possível?" e passa a ser **"quanto custa um
+salto de recodificação?"** — CPU, latência e qualidade, em máquina de espectador
+comum. Se o custo for alto, a árvore muda de forma (repassar em resolução menor,
+ou só promover quem tem encoder de hardware), mas não deixa de existir.
 
 **Lacunas de teste herdadas.** Não existe cobertura para o comportamento de
 fan-out do WebRTC, `P2P_ONLY` não é exercitado no CI, e não há teste de
@@ -148,6 +175,8 @@ construir esse arcabouço antes de mexer na topologia.
 | Papel de repassador invisível para quem assiste | Decisão do usuário: acontece nos bastidores como em qualquer P2P | — Pending |
 | TURN só instrumentado, não implantado | TURN reencaminha mídia pelo servidor — é a mesma banda do relay com outro protocolo, e o relay já cobre esses casos. Medir quantos pares não fecham antes de gastar | — Pending |
 | Capacidade medida, nunca chutada | Leque chutado é o que faz a árvore ficar pior que o relay: um pai que aceita 3 filhos com subida para 1 arrasta os três junto | — Pending |
+| Capacidade cresce devagar, encolhe rápido | A estimativa de banda do Chrome roda independente por `RTCPeerConnection` e não soma entre filhos; além disso um fluxo novo sobe de ~15% para 100% do alvo ao longo de ~30 s. Ler capacidade logo após um filho conectar e admitir outro é o modo de falha clássico | — Pending |
+| Exposição de IP entre espectadores é consequência aceita da árvore | Na estrela só quem transmite via o IP de quem assiste; na árvore o repassador vê o dos filhos. mDNS não cobre (só esconde candidatos de rede local) e o proxy da Activity não cobre (só HTTP, não ICE/UDP). **Decisão do usuário ainda pendente** | — Pending |
 | Histerese na re-paternização | Mesma lição do backpressure do encoder: limiar seco em cima do limite produz oscilação, e oscilação se vê como tranco. Só troca quando o ganho for claramente maior que o custo | — Pending |
 | Bugs de UI entram cedo, em fase própria | São independentes da topologia e a engrenagem de qualidade é necessária para testar o leque medido — sem variar bitrate não dá para ver a capacidade reagir | — Pending |
 
@@ -169,4 +198,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-20 after initialization*
+*Last updated: 2026-08-20 after project research (repasse recodifica — R3 corrigido)*
