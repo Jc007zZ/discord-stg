@@ -246,3 +246,5 @@ Para quem mexe no código:
 
 Se você mexe em código e quer entender as decisões por trás disso,
 veja [docs/como-funciona.md](docs/como-funciona.md).
+
+Para rodar em mais de uma máquina, veja [docs/sharding.md](docs/sharding.md).
